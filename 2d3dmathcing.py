@@ -161,7 +161,7 @@ def reproj_errors(pts_3d, pts_2d, R, t, cameraMatrix):
     return np.linalg.norm(uv_hat - pts_2d, axis=1)
 
 
-def pnp_ransac(pts_3d, pts_2d, cameraMatrix, distCoeffs=None, reproj_thresh=4.0, max_iters=2000, min_sample=6, confidence=0.99, seed=42):
+def pnp_ransac(pts_3d, pts_2d, cameraMatrix, distCoeffs=None, reproj_thresh=4.0, max_iters=2000, min_sample=6, confidence=0.99):
     fx, fy = cameraMatrix[0, 0], cameraMatrix[1, 1]
     cx, cy = cameraMatrix[0, 2], cameraMatrix[1, 2]
     if distCoeffs is not None:
@@ -172,7 +172,6 @@ def pnp_ransac(pts_3d, pts_2d, cameraMatrix, distCoeffs=None, reproj_thresh=4.0,
     best_inliers = []
     best_R, best_t = None, None
 
-    # 預先打亂索引以加速抽樣
     idx_all = list(range(N))
 
     # RANSAC 迴圈
@@ -180,16 +179,13 @@ def pnp_ransac(pts_3d, pts_2d, cameraMatrix, distCoeffs=None, reproj_thresh=4.0,
         idx = np.random.choice(idx_all, size=min_sample, replace=False)
         R_try, t_try = epnp(pts_3d[idx], pts_2d[idx], cameraMatrix)
 
-        # 2) 數內點
         errs = reproj_errors(pts_3d, pts_2d, R_try, t_try, cameraMatrix)
         inliers = np.where(errs < reproj_thresh)[0]
 
-        # 3) 更新最佳
         if len(inliers) > len(best_inliers):
             best_inliers = inliers
             best_R, best_t = R_try, t_try
 
-            # 動態終止條件（依目前內點率估算所需迭代）
             w = len(inliers) / N
             w = np.clip(w, 1e-6, 1-1e-6)
             denom = np.log(1 - (w ** min_sample))
@@ -197,11 +193,9 @@ def pnp_ransac(pts_3d, pts_2d, cameraMatrix, distCoeffs=None, reproj_thresh=4.0,
                 k_needed = int(np.ceil(np.log(1 - confidence) / denom))
                 max_iters = min(max_iters, k_needed)
 
-        # 提早收斂
         if it >= max_iters - 1:
             break
 
-    # 若完全失敗，回傳 None
     if best_R is None:
         return False, None, None, np.array([], dtype=int)
 
@@ -220,6 +214,11 @@ def pnpsolver(query,model,cameraMatrix=0,distortion=0):
 
     # TODO: solve PnP problem using OpenCV
     # Hint: you may use "Descriptors Matching and ratio test" first
+
+    # bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
+
+    # 進行 knn matching（每個 query descriptor 找兩個 model descriptor）
+    # matches = bf.knnMatch(desc_query, desc_model, k=2)
 
     # 建立 FLANN 比對器
     FLANN_INDEX_KDTREE = 1
@@ -247,7 +246,7 @@ def pnpsolver(query,model,cameraMatrix=0,distortion=0):
         pts_3d, pts_2d,
         cameraMatrix,
         distCoeffs,
-        reproj_thresh=8.0,
+        reproj_thresh=4.0,
         confidence=0.99
     )
 
